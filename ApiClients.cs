@@ -109,6 +109,28 @@ public sealed class GroqClient
         return Complete(messages.ToArray(), .6, 100);
     }
 
+    public async Task<IReadOnlyList<ExtractedPreference>> ExtractPreferences(string text)
+    {
+        var content = await Complete(new[]
+        {
+            new ChatMessage("system", """
+            extract durable user preferences or profile facts from the user message.
+            return only json shaped like {"preferences":[{"key":"temperature_unit","value":"fahrenheit"}]}.
+            extract only explicit durable statements like "i prefer...", "i like...", "i hate...", "always...", "don't...", "call me...", "use ...".
+            do not extract temporary one-off requests like "show this in fahrenheit" or ordinary questions.
+            use compact snake_case keys and short values.
+            if nothing durable is present, return {"preferences":[]}.
+            """),
+            new ChatMessage("user", text)
+        }, 0, 160);
+
+        var start = content.IndexOf('{');
+        var end = content.LastIndexOf('}');
+        if (start >= 0 && end >= start) content = content[start..(end + 1)];
+        var decoded = JsonSerializer.Deserialize<PreferenceExtractionResponse>(content, JsonOptions());
+        return decoded?.Preferences ?? new List<ExtractedPreference>();
+    }
+
     public async Task<ClickTarget> LocateClickTarget(string instruction, ScreenSnapshot snapshot)
     {
         var coarsePrompt =
@@ -171,5 +193,7 @@ public sealed class GroqClient
 
 public record TranscriptionResponse([property: JsonPropertyName("text")] string Text);
 public record ChatMessage(string Role, string Content);
+public record ExtractedPreference(string Key, string Value);
+public sealed class PreferenceExtractionResponse { public List<ExtractedPreference>? Preferences { get; set; } }
 public sealed class ChatResponse { public List<Choice>? Choices { get; set; } }
 public sealed class Choice { public ChatMessage? Message { get; set; } }

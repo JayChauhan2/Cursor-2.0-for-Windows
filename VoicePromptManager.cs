@@ -191,6 +191,13 @@ public sealed class VoicePromptManager
             return "cool, fresh thread";
         }
 
+        if (ShouldClearPreferences(prompt))
+        {
+            MemoryStore.Shared.ClearPreferences();
+            DebugLog.Write($"route=clear-preferences prompt={Quote(prompt)}");
+            return "cool, forgot your saved preferences";
+        }
+
         if (Regex.IsMatch(prompt, @"\btetris\b", RegexOptions.IgnoreCase))
         {
             DebugLog.Write($"route=tetris prompt={Quote(prompt)}");
@@ -229,7 +236,8 @@ public sealed class VoicePromptManager
     private async Task<string> AnswerNormally(string prompt)
     {
         var client = new GroqClient();
-        var memory = ShouldUseMemory(prompt) ? MemoryStore.Shared.Context() : "";
+        var profile = MemoryStore.Shared.ProfileContext();
+        var memory = ShouldUseMemory(prompt) ? MemoryStore.Shared.Context() : profile;
         var threadContext = ThreadStore.Shared.ContextText();
         var threadMessages = ThreadStore.Shared.RecentMessages();
         DebugLog.Write($"memory {(string.IsNullOrWhiteSpace(memory) ? "off" : "on")} prompt={Quote(prompt)}");
@@ -240,7 +248,25 @@ public sealed class VoicePromptManager
         var answer = await client.Chat(prompt, threadMessages, memory, search?.Context);
         var displayAnswer = AppendSearchFooter(answer, search);
         ThreadStore.Shared.AddAssistant(answer);
+        await SavePreferencesIfAny(client, prompt);
         return displayAnswer;
+    }
+
+    private static async Task SavePreferencesIfAny(GroqClient client, string prompt)
+    {
+        if (!MightContainPreference(prompt)) return;
+
+        try
+        {
+            var preferences = await client.ExtractPreferences(prompt);
+            if (preferences.Count == 0) return;
+            MemoryStore.Shared.SavePreferences(preferences, prompt);
+            DebugLog.Write($"preferences saved prompt={Quote(prompt)} count={preferences.Count}");
+        }
+        catch (Exception ex)
+        {
+            DebugLog.Write($"preferences skipped prompt={Quote(prompt)} error={Quote(ex.Message)}");
+        }
     }
 
     private async Task<string> ClickOnScreen(string prompt)
@@ -370,10 +396,22 @@ public sealed class VoicePromptManager
         return Regex.IsMatch(cleaned, @"\b(remember|my location|where am i|near me|weather|forecast|again|last time|earlier|previous|before|that|it)\b", RegexOptions.IgnoreCase);
     }
 
+    private static bool MightContainPreference(string prompt)
+    {
+        var cleaned = CleanLocation(prompt).ToLowerInvariant();
+        return Regex.IsMatch(cleaned, @"\b(i prefer|i like|i hate|i don't like|i dont like|always|don't|dont|call me|use .+ instead|my preference|i'd rather|id rather)\b", RegexOptions.IgnoreCase);
+    }
+
     private static bool ShouldClearThread(string prompt)
     {
         var cleaned = CleanLocation(prompt).ToLowerInvariant();
         return Regex.IsMatch(cleaned, @"\b(new topic|fresh thread|forget this conversation|clear conversation|reset conversation)\b", RegexOptions.IgnoreCase);
+    }
+
+    private static bool ShouldClearPreferences(string prompt)
+    {
+        var cleaned = CleanLocation(prompt).ToLowerInvariant();
+        return Regex.IsMatch(cleaned, @"\b(forget my preferences|clear my preferences|reset my preferences|forget saved preferences)\b", RegexOptions.IgnoreCase);
     }
 
     private static string AppendSearchFooter(string answer, SearchResult? search)

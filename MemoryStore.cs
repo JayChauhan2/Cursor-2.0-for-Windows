@@ -3,9 +3,11 @@ using System.Text.Json;
 namespace Cursor2Windows;
 
 public record MemoryEntry(string Question, string Answer, DateTime CreatedAt);
+public record UserPreference(string Key, string Value, string Source, DateTime CreatedAt, DateTime UpdatedAt);
 public sealed class UserProfile
 {
     public string? HomeLocation { get; set; }
+    public List<UserPreference> Preferences { get; set; } = new();
 }
 
 public sealed class MemoryStore
@@ -29,7 +31,16 @@ public sealed class MemoryStore
     {
         var lines = new List<string>();
         if (!string.IsNullOrWhiteSpace(_profile.HomeLocation)) lines.Add($"user home location: {_profile.HomeLocation}");
+        lines.AddRange(_profile.Preferences.Select(preference => $"user preference: {preference.Key} = {preference.Value}"));
         lines.AddRange(_entries.TakeLast(8).Select(e => $"user: {e.Question}\nassistant: {e.Answer}"));
+        return string.Join("\n", lines);
+    }
+
+    public string ProfileContext()
+    {
+        var lines = new List<string>();
+        if (!string.IsNullOrWhiteSpace(_profile.HomeLocation)) lines.Add($"home location: {_profile.HomeLocation}");
+        lines.AddRange(_profile.Preferences.Select(preference => $"{preference.Key}: {preference.Value}"));
         return string.Join("\n", lines);
     }
 
@@ -46,6 +57,44 @@ public sealed class MemoryStore
         PersistProfile();
     }
 
+    public void SavePreferences(IEnumerable<ExtractedPreference> preferences, string source)
+    {
+        foreach (var preference in preferences)
+        {
+            var key = CleanKey(preference.Key);
+            var value = preference.Value.Trim();
+            if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(value)) continue;
+
+            var existing = _profile.Preferences.FirstOrDefault(item => CleanKey(item.Key) == key);
+            if (existing is null)
+            {
+                _profile.Preferences.Add(new UserPreference(key, value, source.Trim(), DateTime.UtcNow, DateTime.UtcNow));
+            }
+            else
+            {
+                var index = _profile.Preferences.IndexOf(existing);
+                _profile.Preferences[index] = existing with
+                {
+                    Value = value,
+                    Source = source.Trim(),
+                    UpdatedAt = DateTime.UtcNow
+                };
+            }
+        }
+
+        _profile.Preferences = _profile.Preferences
+            .Where(preference => !string.IsNullOrWhiteSpace(preference.Value))
+            .TakeLast(40)
+            .ToList();
+        PersistProfile();
+    }
+
+    public void ClearPreferences()
+    {
+        _profile.Preferences.Clear();
+        PersistProfile();
+    }
+
     private void Load()
     {
         if (File.Exists(_memoryPath)) _entries = JsonSerializer.Deserialize<List<MemoryEntry>>(File.ReadAllText(_memoryPath)) ?? new();
@@ -53,4 +102,5 @@ public sealed class MemoryStore
     }
 
     private void PersistProfile() => File.WriteAllText(_profilePath, JsonSerializer.Serialize(_profile));
+    private static string CleanKey(string key) => key.Trim().ToLowerInvariant().Replace(" ", "_");
 }
