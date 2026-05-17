@@ -235,11 +235,12 @@ public sealed class VoicePromptManager
         DebugLog.Write($"memory {(string.IsNullOrWhiteSpace(memory) ? "off" : "on")} prompt={Quote(prompt)}");
         var searchQuery = await client.SearchQuery(prompt, memory, threadContext);
         DebugLog.Write($"search query prompt={Quote(prompt)} query={Quote(searchQuery ?? "no")}");
-        var search = searchQuery is null ? null : await new TavilyClient().SearchContext(searchQuery);
+        var search = searchQuery is null ? null : await new TavilyClient().Search(searchQuery);
         ThreadStore.Shared.AddUser(prompt);
-        var answer = await client.Chat(prompt, threadMessages, memory, search);
+        var answer = await client.Chat(prompt, threadMessages, memory, search?.Context);
+        var displayAnswer = AppendSearchFooter(answer, search);
         ThreadStore.Shared.AddAssistant(answer);
-        return answer;
+        return displayAnswer;
     }
 
     private async Task<string> ClickOnScreen(string prompt)
@@ -373,6 +374,30 @@ public sealed class VoicePromptManager
     {
         var cleaned = CleanLocation(prompt).ToLowerInvariant();
         return Regex.IsMatch(cleaned, @"\b(new topic|fresh thread|forget this conversation|clear conversation|reset conversation)\b", RegexOptions.IgnoreCase);
+    }
+
+    private static string AppendSearchFooter(string answer, SearchResult? search)
+    {
+        if (search is null) return answer;
+
+        var lines = new List<string>
+        {
+            "",
+            $"searched: {search.Query}"
+        };
+        if (search.Sources.Count > 0)
+        {
+            lines.Add("sources:");
+            lines.AddRange(search.Sources.Select((source, index) => $"{index + 1}. {Shorten(source.Title, 42)} - {source.Url}"));
+        }
+
+        return answer.TrimEnd() + "\n" + string.Join("\n", lines);
+    }
+
+    private static string Shorten(string text, int maxLength)
+    {
+        var cleaned = Regex.Replace(text, @"\s+", " ").Trim();
+        return cleaned.Length <= maxLength ? cleaned : cleaned[..Math.Max(0, maxLength - 3)] + "...";
     }
 
     private static string Quote(string text) => "\"" + text.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n") + "\"";

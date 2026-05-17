@@ -11,7 +11,7 @@ public sealed class TavilyClient
     private readonly string _apiKey = Environment.GetEnvironmentVariable("TAVILY_API_KEY") ?? "";
     private static readonly HttpClient Http = new();
 
-    public async Task<string> SearchContext(string query)
+    public async Task<SearchResult> Search(string query)
     {
         if (string.IsNullOrWhiteSpace(_apiKey)) throw new InvalidOperationException("bro drop the Tavily key in first");
         using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.tavily.com/search");
@@ -24,7 +24,12 @@ public sealed class TavilyClient
         var parts = new List<string>();
         if (!string.IsNullOrWhiteSpace(decoded.Answer)) parts.Add($"Tavily answer: {decoded.Answer}");
         parts.AddRange((decoded.Results ?? new()).Where(r => !string.IsNullOrWhiteSpace(r.Content)).Take(4).Select(r => $"{r.Title}: {r.Content}"));
-        return string.Join("\n", parts);
+        var sources = (decoded.Results ?? new())
+            .Where(r => !string.IsNullOrWhiteSpace(r.Url))
+            .Take(4)
+            .Select(r => new SearchSource(r.Title?.Trim() ?? r.Url!.Trim(), r.Url!.Trim()))
+            .ToList();
+        return new SearchResult(query, string.Join("\n", parts), sources);
     }
 
     private static StringContent JsonContent(object payload) => new(JsonSerializer.Serialize(payload, JsonOptions()), Encoding.UTF8, "application/json");
@@ -40,8 +45,12 @@ public sealed class TavilySearchResponse
 public sealed class TavilySearchResult
 {
     [JsonPropertyName("title")] public string? Title { get; set; }
+    [JsonPropertyName("url")] public string? Url { get; set; }
     [JsonPropertyName("content")] public string? Content { get; set; }
 }
+
+public sealed record SearchResult(string Query, string Context, IReadOnlyList<SearchSource> Sources);
+public sealed record SearchSource(string Title, string Url);
 
 public sealed class GroqClient
 {
