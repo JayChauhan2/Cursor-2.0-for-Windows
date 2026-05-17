@@ -88,7 +88,7 @@ public sealed class GroqClient
         if (!string.IsNullOrWhiteSpace(searchContext)) userContent += $"\n\nweb search context:\n{searchContext}";
         return Complete(new[]
         {
-            new ChatMessage("system", "reply in all lowercase, super concise, casual like a bro. use memory for context. use web search context only when provided, but never sound formal or cite sources unless asked. answer with the direct result first. if missing info blocks the task, ask exactly one short follow-up question. examples: 'about 41.7 crore rupees', 'nah, that's outdated', 'where you at?'. one short sentence unless the user clearly needs more."),
+            new ChatMessage("system", "reply in all lowercase, super concise, casual like a bro. use memory for context only when it is directly relevant to the current question. use web search context only when provided, but never sound formal or cite sources unless asked. answer with the direct result first. if missing info blocks the task, ask exactly one short follow-up question. one short sentence unless the user clearly needs more."),
             new ChatMessage("user", userContent)
         }, .6, 80);
     }

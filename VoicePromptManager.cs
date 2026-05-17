@@ -222,7 +222,8 @@ public sealed class VoicePromptManager
     private async Task<string> AnswerNormally(string prompt)
     {
         var client = new GroqClient();
-        var memory = MemoryStore.Shared.Context();
+        var memory = ShouldUseMemory(prompt) ? MemoryStore.Shared.Context() : "";
+        DebugLog.Write($"memory {(string.IsNullOrWhiteSpace(memory) ? "off" : "on")} prompt={Quote(prompt)}");
         var searchQuery = await client.SearchQuery(prompt, memory);
         DebugLog.Write($"search query prompt={Quote(prompt)} query={Quote(searchQuery ?? "no")}");
         var search = searchQuery is null ? null : await new TavilyClient().SearchContext(searchQuery);
@@ -346,6 +347,17 @@ public sealed class VoicePromptManager
     }
 
     private static string CleanLocation(string text) => Regex.Replace(text, @"\s+", " ").Trim().Trim('.', ',', '!', '?', ';', ':');
+
+    private static bool ShouldUseMemory(string prompt)
+    {
+        var cleaned = CleanLocation(prompt).ToLowerInvariant();
+        if (Regex.IsMatch(cleaned, @"\b(yo|what's up|whats up|sup|hey|hi|hello|how are you|how's it going|hows it going|you good)\b", RegexOptions.IgnoreCase))
+        {
+            return false;
+        }
+
+        return Regex.IsMatch(cleaned, @"\b(remember|my location|where am i|near me|weather|forecast|again|last time|earlier|previous|before|that|it)\b", RegexOptions.IgnoreCase);
+    }
 
     private static string Quote(string text) => "\"" + text.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n") + "\"";
 
