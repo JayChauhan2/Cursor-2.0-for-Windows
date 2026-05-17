@@ -184,6 +184,13 @@ public sealed class VoicePromptManager
 
     private async Task<string> Answer(string prompt)
     {
+        if (ShouldClearThread(prompt))
+        {
+            ThreadStore.Shared.Clear();
+            DebugLog.Write($"route=clear-thread prompt={Quote(prompt)}");
+            return "cool, fresh thread";
+        }
+
         if (Regex.IsMatch(prompt, @"\btetris\b", RegexOptions.IgnoreCase))
         {
             DebugLog.Write($"route=tetris prompt={Quote(prompt)}");
@@ -223,12 +230,15 @@ public sealed class VoicePromptManager
     {
         var client = new GroqClient();
         var memory = ShouldUseMemory(prompt) ? MemoryStore.Shared.Context() : "";
+        var threadContext = ThreadStore.Shared.ContextText();
+        var threadMessages = ThreadStore.Shared.RecentMessages();
         DebugLog.Write($"memory {(string.IsNullOrWhiteSpace(memory) ? "off" : "on")} prompt={Quote(prompt)}");
-        var searchQuery = await client.SearchQuery(prompt, memory);
+        var searchQuery = await client.SearchQuery(prompt, memory, threadContext);
         DebugLog.Write($"search query prompt={Quote(prompt)} query={Quote(searchQuery ?? "no")}");
         var search = searchQuery is null ? null : await new TavilyClient().SearchContext(searchQuery);
-        var answer = await client.Chat(prompt, memory, search);
-        MemoryStore.Shared.Save(prompt, answer);
+        ThreadStore.Shared.AddUser(prompt);
+        var answer = await client.Chat(prompt, threadMessages, memory, search);
+        ThreadStore.Shared.AddAssistant(answer);
         return answer;
     }
 
@@ -357,6 +367,12 @@ public sealed class VoicePromptManager
         }
 
         return Regex.IsMatch(cleaned, @"\b(remember|my location|where am i|near me|weather|forecast|again|last time|earlier|previous|before|that|it)\b", RegexOptions.IgnoreCase);
+    }
+
+    private static bool ShouldClearThread(string prompt)
+    {
+        var cleaned = CleanLocation(prompt).ToLowerInvariant();
+        return Regex.IsMatch(cleaned, @"\b(new topic|fresh thread|forget this conversation|clear conversation|reset conversation)\b", RegexOptions.IgnoreCase);
     }
 
     private static string Quote(string text) => "\"" + text.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n") + "\"";

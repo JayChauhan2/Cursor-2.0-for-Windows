@@ -71,26 +71,33 @@ public sealed class GroqClient
         return transcript;
     }
 
-    public async Task<string?> SearchQuery(string text, string memoryContext)
+    public async Task<string?> SearchQuery(string text, string memoryContext, string threadContext)
     {
         var answer = (await Complete(new[]
         {
-            new ChatMessage("system", "decide if this needs a web search. return only 'no' or a short search query. search for current facts, prices, conversions, news, laws, products, schedules, or anything likely to change. don't search for basic chat, writing help, opinions, or stuff answerable from memory."),
-            new ChatMessage("user", $"memory:\n{memoryContext}\n\nquestion:\n{text}")
+            new ChatMessage("system", "decide if the current user message needs a web search. use recent thread only to resolve follow-ups like a location answer after a weather question. return only 'no' or a short search query. search for current facts, prices, conversions, news, laws, products, schedules, weather, or anything likely to change. don't search for basic chat, writing help, opinions, or stuff answerable from memory."),
+            new ChatMessage("user", $"recent thread:\n{threadContext}\n\nmemory:\n{memoryContext}\n\ncurrent user message:\n{text}")
         }, 0, 40)).Trim().Trim('.', '!', '?');
         return string.Equals(answer, "no", StringComparison.OrdinalIgnoreCase) || answer.Length == 0 ? null : answer;
     }
 
-    public Task<string> Chat(string text, string memoryContext, string? searchContext)
+    public Task<string> Chat(string text, IReadOnlyList<ChatMessage> threadMessages, string memoryContext, string? searchContext)
     {
-        var userContent = $"question: {text}";
-        if (!string.IsNullOrWhiteSpace(memoryContext)) userContent += $"\n\nmemory:\n{memoryContext}";
-        if (!string.IsNullOrWhiteSpace(searchContext)) userContent += $"\n\nweb search context:\n{searchContext}";
-        return Complete(new[]
+        var messages = new List<ChatMessage>
         {
-            new ChatMessage("system", "reply in all lowercase, super concise, casual like a bro. use memory for context only when it is directly relevant to the current question. use web search context only when provided, but never sound formal or cite sources unless asked. answer with the direct result first. if missing info blocks the task, ask exactly one short follow-up question. one short sentence unless the user clearly needs more."),
-            new ChatMessage("user", userContent)
-        }, .6, 80);
+            new("system", "reply in all lowercase, super concise, casual like a bro. use the recent thread to understand follow-ups. use memory only when it is directly relevant to the current question. use web search context only when provided, but never sound formal or cite sources unless asked. answer with the direct result first. if missing info blocks the task, ask exactly one short follow-up question. one short sentence unless the user clearly needs more.")
+        };
+        if (!string.IsNullOrWhiteSpace(memoryContext))
+        {
+            messages.Add(new ChatMessage("system", $"memory:\n{memoryContext}"));
+        }
+        if (!string.IsNullOrWhiteSpace(searchContext))
+        {
+            messages.Add(new ChatMessage("system", $"web search context:\n{searchContext}"));
+        }
+        messages.AddRange(threadMessages);
+        messages.Add(new ChatMessage("user", text));
+        return Complete(messages.ToArray(), .6, 100);
     }
 
     public async Task<ClickTarget> LocateClickTarget(string instruction, ScreenSnapshot snapshot)
