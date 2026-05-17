@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _renderTimer = new() { Interval = TimeSpan.FromMilliseconds(80) };
     private readonly Random _random = new();
     private Border _bubble = null!;
+    private TextBlock _submittedText = null!;
     private TextBlock _userText = null!;
     private TextBlock _responseText = null!;
     private StackPanel _waveform = null!;
@@ -67,12 +68,14 @@ public partial class MainWindow : Window
         }
 
         _tetris = new MiniTetrisView(_state);
+        _submittedText = new TextBlock { FontSize = 9, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromArgb(150, 255, 255, 255)), TextWrapping = TextWrapping.Wrap, MaxWidth = 180, Margin = new Thickness(0, 0, 0, 3) };
         _userText = new TextBlock { FontSize = 11, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, MaxWidth = 180 };
         _responseText = new TextBlock { FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = Brushes.White, TextWrapping = TextWrapping.Wrap, MaxWidth = 180 };
 
         var textStack = new StackPanel();
         textStack.Children.Add(_waveform);
         textStack.Children.Add(_tetris);
+        textStack.Children.Add(_submittedText);
         textStack.Children.Add(_userText);
         textStack.Children.Add(_responseText);
 
@@ -105,6 +108,8 @@ public partial class MainWindow : Window
             _check.Visibility = _state.IsSending ? Visibility.Visible : Visibility.Collapsed;
             _bubble.Opacity = _state.IsVisible ? 1 : 0;
             Root.Opacity = _state.IsVisible ? 1 : 0;
+            _submittedText.Text = string.IsNullOrWhiteSpace(_state.SubmittedText) ? "" : $"sent: {_state.SubmittedText}";
+            _submittedText.Visibility = string.IsNullOrWhiteSpace(_state.SubmittedText) ? Visibility.Collapsed : Visibility.Visible;
             _userText.Text = _state.UserText;
             _userText.Foreground = new SolidColorBrush(color);
             _responseText.Text = _state.ResponseText;

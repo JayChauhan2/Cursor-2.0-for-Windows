@@ -22,6 +22,7 @@ public sealed class OverlayState
     public double AudioLevel { get; set; }
     public string ResponseText { get; set; } = "";
     public string UserText { get; set; } = "";
+    public string SubmittedText { get; set; } = "";
     public bool IsListening { get; set; }
     public bool IsProcessing { get; set; }
     public bool IsSending { get; set; }
