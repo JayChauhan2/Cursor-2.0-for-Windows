@@ -3,11 +3,9 @@ using System.Text.Json;
 namespace Cursor2Windows;
 
 public record MemoryEntry(string Question, string Answer, DateTime CreatedAt);
-public record PendingTask(string OriginalQuestion, string? AssistantQuestion, string? Kind, string? Missing, DateTime CreatedAt);
 public sealed class UserProfile
 {
     public string? HomeLocation { get; set; }
-    public PendingTask? PendingTask { get; set; }
 }
 
 public sealed class MemoryStore
@@ -31,11 +29,6 @@ public sealed class MemoryStore
     {
         var lines = new List<string>();
         if (!string.IsNullOrWhiteSpace(_profile.HomeLocation)) lines.Add($"user home location: {_profile.HomeLocation}");
-        if (_profile.PendingTask is { } pending)
-        {
-            lines.Add($"pending task original request: {pending.OriginalQuestion}");
-            lines.Add($"pending task follow-up asked: {pending.AssistantQuestion ?? pending.Missing ?? "unknown"}");
-        }
         lines.AddRange(_entries.TakeLast(8).Select(e => $"user: {e.Question}\nassistant: {e.Answer}"));
         return string.Join("\n", lines);
     }
@@ -52,10 +45,6 @@ public sealed class MemoryStore
         _profile.HomeLocation = location.Trim();
         PersistProfile();
     }
-
-    public PendingTask? PendingTask() => _profile.PendingTask;
-    public void SetPendingTask(PendingTask task) { _profile.PendingTask = task; PersistProfile(); }
-    public void ClearPendingTask() { _profile.PendingTask = null; PersistProfile(); }
 
     private void Load()
     {

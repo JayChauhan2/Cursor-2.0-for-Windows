@@ -206,8 +206,6 @@ public sealed class VoicePromptManager
             return await ClickOnScreen(prompt);
         }
 
-        if (await AnswerPendingTaskIfPossible(prompt) is { } pending) return pending;
-
         if (ExplicitLocation(prompt) is { } location)
         {
             DebugLog.Write($"route=location prompt={Quote(prompt)} location={Quote(location)}");
@@ -221,7 +219,7 @@ public sealed class VoicePromptManager
         return await AnswerNormally(prompt);
     }
 
-    private async Task<string> AnswerNormally(string prompt, string? pendingOriginalQuestion = null)
+    private async Task<string> AnswerNormally(string prompt)
     {
         var client = new GroqClient();
         var memory = MemoryStore.Shared.Context();
@@ -230,40 +228,7 @@ public sealed class VoicePromptManager
         var search = searchQuery is null ? null : await new TavilyClient().SearchContext(searchQuery);
         var answer = await client.Chat(prompt, memory, search);
         MemoryStore.Shared.Save(prompt, answer);
-        UpdatePendingTaskIfNeeded(pendingOriginalQuestion ?? prompt, answer);
         return answer;
-    }
-
-    private async Task<string?> AnswerPendingTaskIfPossible(string prompt)
-    {
-        var pending = MemoryStore.Shared.PendingTask();
-        if (pending is null) return null;
-        if (LooksLikeFreshQuestion(prompt))
-        {
-            DebugLog.Write($"route=pending-cleared-fresh prompt={Quote(prompt)} pendingOriginal={Quote(pending.OriginalQuestion)} pendingQuestion={Quote(pending.AssistantQuestion ?? pending.Missing ?? "")}");
-            MemoryStore.Shared.ClearPendingTask();
-            return null;
-        }
-
-        if (Regex.IsMatch(prompt, @"\b(cancel|never mind|nevermind|forget it|stop|ignore that)\b", RegexOptions.IgnoreCase))
-        {
-            DebugLog.Write($"route=pending-cancel prompt={Quote(prompt)}");
-            MemoryStore.Shared.ClearPendingTask();
-            const string answer = "cool, dropped it";
-            MemoryStore.Shared.Save(prompt, answer);
-            return answer;
-        }
-        var location = ExplicitLocation(prompt) ?? LikelyLocation(prompt);
-        if (location is not null) MemoryStore.Shared.SetHomeLocation(location);
-        MemoryStore.Shared.ClearPendingTask();
-        DebugLog.Write($"route=pending-followup prompt={Quote(prompt)} pendingOriginal={Quote(pending.OriginalQuestion)} pendingQuestion={Quote(pending.AssistantQuestion ?? pending.Missing ?? "")}");
-        return await AnswerNormally($"""
-        original user request: {pending.OriginalQuestion}
-        assistant follow-up question: {pending.AssistantQuestion ?? pending.Missing ?? "missing info"}
-        user follow-up answer: {prompt}
-
-        continue the original request using the user's follow-up answer. do not greet the user or treat their answer as standalone.
-        """, pending.OriginalQuestion);
     }
 
     private async Task<string> ClickOnScreen(string prompt)
@@ -381,41 +346,6 @@ public sealed class VoicePromptManager
     }
 
     private static string CleanLocation(string text) => Regex.Replace(text, @"\s+", " ").Trim().Trim('.', ',', '!', '?', ';', ':');
-
-    private static void UpdatePendingTaskIfNeeded(string originalQuestion, string answer)
-    {
-        var cleaned = CleanLocation(answer);
-        if (cleaned.Length is 0 or > 240) return;
-        if (!LooksLikeTaskRequest(originalQuestion))
-        {
-            DebugLog.Write($"pending skipped casual original={Quote(originalQuestion)} answer={Quote(cleaned)}");
-            return;
-        }
-
-        var lower = cleaned.ToLowerInvariant();
-        var asks = cleaned.Contains('?') || new[] { "where you", "what's your", "what is your", "which", "when", "what time", "what date", "send me", "tell me", "need your", "need the", "give me", "drop the" }.Any(lower.Contains);
-        if (asks)
-        {
-            DebugLog.Write($"pending saved original={Quote(originalQuestion)} followup={Quote(cleaned)}");
-            MemoryStore.Shared.SetPendingTask(new PendingTask(originalQuestion, cleaned, "general", null, DateTime.UtcNow));
-        }
-    }
-
-    private static bool LooksLikeFreshQuestion(string prompt)
-    {
-        var cleaned = CleanLocation(prompt).ToLowerInvariant();
-        if (cleaned.Length == 0) return false;
-        if (cleaned.Contains('?')) return true;
-        return Regex.IsMatch(cleaned, @"^(what|what's|whats|where|when|who|why|how|can you|could you|please|tell me|show me|search|find|look up|click|tap|press|select|open|start|launch)\b", RegexOptions.IgnoreCase);
-    }
-
-    private static bool LooksLikeTaskRequest(string prompt)
-    {
-        var cleaned = CleanLocation(prompt).ToLowerInvariant();
-        if (cleaned.Length == 0) return false;
-        if (Regex.IsMatch(cleaned, @"\b(how are you|how's it going|hows it going|what's up|whats up|you good|are you ok|hello|hi|hey)\b", RegexOptions.IgnoreCase)) return false;
-        return LooksLikeFreshQuestion(cleaned) || Regex.IsMatch(cleaned, @"\b(weather|forecast|click|tap|press|select|remember|set|search|find|look up|send|write|make|create|open|launch|start|schedule|price|news)\b", RegexOptions.IgnoreCase);
-    }
 
     private static string Quote(string text) => "\"" + text.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n") + "\"";
 
