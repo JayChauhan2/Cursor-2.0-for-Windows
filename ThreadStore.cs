@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Cursor2Windows;
 
@@ -33,6 +34,18 @@ public sealed class ThreadStore
         return string.Join("\n", _entries.TakeLast(MaxMessages).Select(entry => $"{entry.Role}: {entry.Content}"));
     }
 
+    public string? LastSearchSubject()
+    {
+        foreach (var entry in _entries.AsEnumerable().Reverse())
+        {
+            if (entry.Role != "user") continue;
+            var subject = SearchSubjectFrom(entry.Content);
+            if (!string.IsNullOrWhiteSpace(subject)) return subject;
+        }
+
+        return null;
+    }
+
     public void AddUser(string content) => Add("user", content);
     public void AddAssistant(string content) => Add("assistant", content);
 
@@ -59,4 +72,15 @@ public sealed class ThreadStore
     }
 
     private void Persist() => File.WriteAllText(_threadPath, JsonSerializer.Serialize(_entries));
+
+    private static string? SearchSubjectFrom(string text)
+    {
+        var cleaned = Regex.Replace(text, @"(?i)\b(?:can you|could you|please|search(?:ed)?(?:\s+up)?|look(?:ed)?\s+up|lookup|google|online|on the internet|web search|search the web|find online|tell me about|who is|who's|what is|what's|him|her|them|it)\b", " ");
+        cleaned = Regex.Replace(cleaned, @"[^a-zA-Z0-9\s.'-]", " ");
+        cleaned = Regex.Replace(cleaned, @"\s+", " ").Trim().Trim('.', ',', '!', '?', ';', ':');
+        if (cleaned.Length < 3 || cleaned.Length > 90) return null;
+        if (!Regex.IsMatch(cleaned, @"[a-zA-Z]{2,}\s+[a-zA-Z]{2,}")) return null;
+        if (Regex.IsMatch(cleaned, @"(?i)\b(weather|forecast|temperature|population|crore|rupees|million|how are you|what'?s up|whats up)\b")) return null;
+        return cleaned;
+    }
 }

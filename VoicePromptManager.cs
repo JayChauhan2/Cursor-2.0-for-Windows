@@ -241,8 +241,12 @@ public sealed class VoicePromptManager
         var threadContext = ThreadStore.Shared.ContextText();
         var threadMessages = ThreadStore.Shared.RecentMessages();
         DebugLog.Write($"memory {(string.IsNullOrWhiteSpace(memory) ? "off" : "on")} prompt={Quote(prompt)}");
-        var searchQuery = await client.SearchQuery(prompt, memory, threadContext);
-        DebugLog.Write($"search query prompt={Quote(prompt)} query={Quote(searchQuery ?? "no")}");
+        var explicitSearchQuery = BuildExplicitSearchQuery(prompt);
+        var correctionSearchQuery = explicitSearchQuery is null ? BuildCorrectionSearchQuery(prompt) : null;
+        var searchQuery = explicitSearchQuery ?? correctionSearchQuery ?? await client.SearchQuery(prompt, memory, threadContext);
+        searchQuery = CleanSearchQuery(searchQuery);
+        var searchSource = explicitSearchQuery is not null ? "explicit" : correctionSearchQuery is not null ? "correction" : "router";
+        DebugLog.Write($"search query source={searchSource} prompt={Quote(prompt)} query={Quote(searchQuery ?? "no")}");
         var search = searchQuery is null ? null : await new TavilyClient().Search(searchQuery);
         ThreadStore.Shared.AddUser(prompt);
         var answer = await client.Chat(prompt, threadMessages, memory, search?.Context);
@@ -414,28 +418,58 @@ public sealed class VoicePromptManager
         return Regex.IsMatch(cleaned, @"\b(forget my preferences|clear my preferences|reset my preferences|forget saved preferences)\b", RegexOptions.IgnoreCase);
     }
 
+    private static string? BuildExplicitSearchQuery(string prompt)
+    {
+        if (!Regex.IsMatch(prompt, @"(?i)\b(search|search up|look up|lookup|google|online|on the internet|search the web|web search|find online)\b")) return null;
+        var query = SearchSubjectFromPrompt(prompt);
+        return string.IsNullOrWhiteSpace(query) ? ThreadStore.Shared.LastSearchSubject() : query;
+    }
+
+    private static string? BuildCorrectionSearchQuery(string prompt)
+    {
+        if (!Regex.IsMatch(prompt, @"(?i)\b(no|wrong|not true|isn'?t|actually|instead)\b")) return null;
+        var subject = ThreadStore.Shared.LastSearchSubject();
+        if (string.IsNullOrWhiteSpace(subject)) return null;
+        var detail = SearchSubjectFromPrompt(prompt);
+        return string.IsNullOrWhiteSpace(detail) ? subject : $"{subject} {detail}";
+    }
+
+    private static string? SearchSubjectFromPrompt(string prompt)
+    {
+        var cleaned = Regex.Replace(prompt, @"(?i)\b(?:can you|could you|please|search(?:ed)?(?:\s+up)?|look(?:ed)?\s+up|lookup|google|online|on the internet|web search|search the web|find online|tell me about|who is|who's|what is|what's|him|her|them|it)\b", " ");
+        cleaned = Regex.Replace(cleaned, @"(?i)\b(?:no|wrong|not|not true|actually|instead|he is|she is|they are|at|near)\b", " ");
+        cleaned = Regex.Replace(cleaned, @"[^a-zA-Z0-9\s.'-]", " ");
+        cleaned = Regex.Replace(cleaned, @"\s+", " ").Trim().Trim('.', ',', '!', '?', ';', ':');
+        return cleaned.Length == 0 ? null : cleaned;
+    }
+
+    private static string? CleanSearchQuery(string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return null;
+        var cleaned = Regex.Replace(query, @"(?i)^\s*(?:yes|query|search)\s*[:,\-]?\s*", "");
+        cleaned = Regex.Replace(cleaned, @"\s+", " ").Trim().Trim('.', ',', '!', '?', ';', ':');
+        return string.Equals(cleaned, "no", StringComparison.OrdinalIgnoreCase) || cleaned.Length == 0 ? null : cleaned;
+    }
+
     private static string AppendSearchFooter(string answer, SearchResult? search)
     {
         if (search is null) return answer;
 
-        var lines = new List<string>
-        {
-            "",
-            $"searched: {search.Query}"
-        };
-        if (search.Sources.Count > 0)
-        {
-            lines.Add("sources:");
-            lines.AddRange(search.Sources.Select((source, index) => $"{index + 1}. {Shorten(source.Title, 42)} - {source.Url}"));
-        }
+        var domains = search.Sources
+            .Select(source => DomainFromUrl(source.Url))
+            .Where(domain => !string.IsNullOrWhiteSpace(domain))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(4)
+            .ToList();
+        var footer = domains.Count == 0 ? "[searched]" : $"[{string.Join(", ", domains)}]";
 
-        return answer.TrimEnd() + "\n" + string.Join("\n", lines);
+        return $"{answer.TrimEnd()} {footer}";
     }
 
-    private static string Shorten(string text, int maxLength)
+    private static string? DomainFromUrl(string url)
     {
-        var cleaned = Regex.Replace(text, @"\s+", " ").Trim();
-        return cleaned.Length <= maxLength ? cleaned : cleaned[..Math.Max(0, maxLength - 3)] + "...";
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return null;
+        return Regex.Replace(uri.Host, @"^(www\.|m\.)", "", RegexOptions.IgnoreCase);
     }
 
     private static string Quote(string text) => "\"" + text.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n") + "\"";
