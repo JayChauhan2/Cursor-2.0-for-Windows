@@ -27,7 +27,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _voice = new VoicePromptManager(_state, Dispatcher);
-        _input = new GlobalInputManager(_state, _voice, Dispatcher, MoveOverlayNearCursor);
+        _input = new GlobalInputManager(_state, _voice, Dispatcher, MoveOverlayNearCursor, ShutdownApp);
         BuildUi();
         Loaded += OnLoaded;
         Closed += (_, _) => _input.Dispose();
@@ -135,9 +135,18 @@ public partial class MainWindow : Window
         Dispatcher.InvokeAsync(() =>
         {
             if (!_state.IsVisible) return;
-            Left = x + 2;
-            Top = y + 18;
+            var source = PresentationSource.FromVisual(this);
+            var transform = source?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
+            var point = transform.Transform(new Point(x, y));
+            Left = point.X + 10;
+            Top = point.Y - 18;
         });
+    }
+
+    private void ShutdownApp()
+    {
+        _input.Dispose();
+        Application.Current.Shutdown();
     }
 
     private void MakeClickThrough()

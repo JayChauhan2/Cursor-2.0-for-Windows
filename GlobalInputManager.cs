@@ -11,6 +11,7 @@ public sealed class GlobalInputManager : IDisposable
     private readonly VoicePromptManager _voice;
     private readonly Dispatcher _dispatcher;
     private readonly Action<int, int> _moveOverlay;
+    private readonly Action _quit;
     private readonly NativeMethods.HookProc _mouseProc;
     private readonly NativeMethods.HookProc _keyboardProc;
     private readonly List<double> _history = new();
@@ -19,12 +20,13 @@ public sealed class GlobalInputManager : IDisposable
     private int? _lastX;
     private int _lastDx;
 
-    public GlobalInputManager(OverlayState state, VoicePromptManager voice, Dispatcher dispatcher, Action<int, int> moveOverlay)
+    public GlobalInputManager(OverlayState state, VoicePromptManager voice, Dispatcher dispatcher, Action<int, int> moveOverlay, Action quit)
     {
         _state = state;
         _voice = voice;
         _dispatcher = dispatcher;
         _moveOverlay = moveOverlay;
+        _quit = quit;
         _mouseProc = MouseHook;
         _keyboardProc = KeyboardHook;
     }
@@ -81,15 +83,33 @@ public sealed class GlobalInputManager : IDisposable
 
     private IntPtr KeyboardHook(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        if (nCode < 0 || !_state.IsVisible || (wParam.ToInt32() != NativeMethods.WM_KEYDOWN && wParam.ToInt32() != NativeMethods.WM_SYSKEYDOWN))
+        if (nCode < 0 || (wParam.ToInt32() != NativeMethods.WM_KEYDOWN && wParam.ToInt32() != NativeMethods.WM_SYSKEYDOWN))
         {
             return NativeMethods.CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
         }
 
         var data = Marshal.PtrToStructure<NativeMethods.KBDLLHOOKSTRUCT>(lParam);
         var key = (int)data.vkCode;
+        if (IsGlobalQuitChord(key))
+        {
+            _dispatcher.Invoke(_quit);
+            return (IntPtr)1;
+        }
+
+        if (!_state.IsVisible)
+        {
+            return NativeMethods.CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
+        }
+
         _dispatcher.Invoke(() => HandleKey(key, data.scanCode));
         return (IntPtr)1;
+    }
+
+    private static bool IsGlobalQuitChord(int key)
+    {
+        var ctrl = (NativeMethods.GetAsyncKeyState(0x11) & 0x8000) != 0;
+        var alt = (NativeMethods.GetAsyncKeyState(0x12) & 0x8000) != 0;
+        return ctrl && alt && key == 0x51;
     }
 
     private void HandleKey(int key, uint scanCode)
